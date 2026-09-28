@@ -1,24 +1,38 @@
 name: Distribution
 
+# Tag dist-<EXIFTOOL_VERSION> (e.g. dist-13.55) → tested self-contained ExifTool
+# distros published as a GitHub Release. Manual runs only build artifacts.
+# dist-* tags are not semver, so they don't interfere with Go module versions (v*).
+
 on:
+  push:
+    tags: [ 'dist-*' ]
   workflow_dispatch:
-  
+
 jobs:
 
   unix:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
+
+    - name: Check tag matches ExifTool version
+      if: startsWith(github.ref, 'refs/tags/dist-')
+      run: |
+        want="${GITHUB_REF_NAME#dist-}"
+        have="$(tr -d '[:space:]' < EXIFTOOL_VERSION)"
+        [ "$want" = "$have" ] \
+          || { echo "::error::tag ${GITHUB_REF_NAME} does not match EXIFTOOL_VERSION ${have}"; exit 1; }
 
     - name: Set up ExifTool
-      run: ./dist_unix.sh exiftool
+      run: ./scripts/dist_unix.sh exiftool
 
     - name: Package ExifTool
       run: |
         tar -cv exiftool | gzip --best > exiftool_unix.tgz
-        
+
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: exiftool_unix
         path: exiftool_unix.tgz
@@ -26,18 +40,42 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up ExifTool
-      run: ./dist_windows.sh exiftool
+      run: ./scripts/dist_windows.sh exiftool
       shell: bash
 
     - name: Package ExifTool
       run: |
         7z a -mx9 exiftool_windows.zip exiftool
-        
+
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: exiftool_windows
         path: exiftool_windows.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/dist-')
+    needs: [ unix, windows ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        merge-multiple: true
+
+    - name: Checksums
+      run: sha256sum exiftool_unix.tgz exiftool_windows.zip > SHA256SUMS
+
+    - name: Publish release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release create "$GITHUB_REF_NAME" \
+          --repo "$GITHUB_REPOSITORY" \
+          --title "ExifTool ${GITHUB_REF_NAME#dist-}" \
+          --notes "Self-contained ExifTool ${GITHUB_REF_NAME#dist-}, built and tested (prove) by scripts/dist_*.sh." \
+          exiftool_unix.tgz exiftool_windows.zip SHA256SUMS
