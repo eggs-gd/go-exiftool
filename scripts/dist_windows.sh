@@ -3,17 +3,30 @@
 set -eo pipefail
 shopt -s extglob
 
-exiftool="https://exiftool.org/Image-ExifTool-12.76.tar.gz"
 strawberry="https://strawberryperl.com/download/5.32.1.1/strawberry-perl-5.32.1.1-64bit-portable.zip"
 
 cd $(dirname "${BASH_SOURCE[0]}")
+cd ..
+
+# Single source of truth for the ExifTool version (also checked by dist.yml)
+version=$(tr -d '[:space:]' < EXIFTOOL_VERSION)
+# exiftool.org no longer hosts tarballs. SourceForge keeps the latest few
+# releases; CPAN keeps production releases forever.
+exiftool_urls=(
+  "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${version}.tar.gz/download"
+  "https://cpan.metacpan.org/authors/id/E/EX/EXIFTOOL/Image-ExifTool-${version}.tar.gz"
+)
 
 # Setup
 rm -rf tmp/
 mkdir -p tmp/
 
 # Download Exiftool
-curl -L# "$exiftool" | tar xz -C tmp/
+for url in "${exiftool_urls[@]}"; do
+  curl -fL# "$url" --output tmp/exiftool.tar.gz && break
+done
+[ -s tmp/exiftool.tar.gz ] || { echo "ExifTool ${version} not found at any source" >&2; exit 1; }
+tar xzf tmp/exiftool.tar.gz -C tmp/ && rm tmp/exiftool.tar.gz
 mv tmp/* tmp/exiftool
 
 # Download Strawberry

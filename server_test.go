@@ -52,7 +52,9 @@ func TestServer(t *testing.T) {
 }
 
 func TestServerCh(t *testing.T) {
-	e, err := NewServerCh(DefaultSplitter)
+	ch := make(chan string, 100) // need buffered channel to not block flow with sync run
+	e, err := NewServerCh(ch, DefaultSplitter)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +70,8 @@ func TestServerCh(t *testing.T) {
 	}
 
 	// ask for version number
-	ch := make(chan string, 100) // need buffered channel to not block flow with sync run
-	err = e.CommandCh(ch, "-ver")
+
+	err = e.CommandCh("-ver")
 
 	if err != nil {
 		t.Error(err)
@@ -79,15 +81,19 @@ func TestServerCh(t *testing.T) {
 		t.Log(ver)
 	}
 
-	// channel should be closed
-	msg, ok := <-ch
-	if ok {
-		t.Error(errors.New("channel not closed after all, msg: " + msg))
-	}
-
 	// close should be fine at any time
 	err = e.Close()
 	if err != nil {
 		t.Error(err)
 	}
+
+	go func() {
+		// channel should be closed
+		msg, ok := <-ch
+		if ok {
+			t.Error(errors.New("channel still not closed, msg: " + msg))
+		}
+	}()
+
+	close(ch)
 }

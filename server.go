@@ -27,17 +27,22 @@ type Server struct {
 	stdout    *bufio.Scanner
 	stderr    *bufio.Scanner
 	splitFunc bufio.SplitFunc
+	chout     chan<- string
 }
 
 func (server *Server) isCustomSplit() bool {
 	return server.splitFunc != nil
 }
 
-func newServerInternal(splitFunc bufio.SplitFunc, commonArg ...string) (*Server, error) {
+func newServerInternal(chout chan<- string, splitFunc bufio.SplitFunc, commonArg ...string) (*Server, error) {
 	e := &Server{exec: Exec}
 
 	if splitFunc != nil {
 		e.splitFunc = splitFunc
+	}
+
+	if chout != nil {
+		e.chout = chout
 	}
 
 	if Arg1 != "" {
@@ -58,12 +63,12 @@ func newServerInternal(splitFunc bufio.SplitFunc, commonArg ...string) (*Server,
 
 // NewServer loads a new instance of ExifTool.
 func NewServer(commonArg ...string) (*Server, error) {
-	return newServerInternal(nil, commonArg...)
+	return newServerInternal(nil, nil, commonArg...)
 }
 
 // NewServerCh loads a new instance of ExifTool with output to channel file by file.
-func NewServerCh(splitFunc bufio.SplitFunc, commonArg ...string) (*Server, error) {
-	return newServerInternal(splitFunc, commonArg...)
+func NewServerCh(chout chan<- string, splitFunc bufio.SplitFunc, commonArg ...string) (*Server, error) {
+	return newServerInternal(chout, splitFunc, commonArg...)
 }
 
 func (e *Server) start() error {
@@ -122,6 +127,7 @@ func (e *Server) restart() {
 func (e *Server) Close() error {
 	e.srvMtx.Lock()
 	defer e.srvMtx.Unlock()
+
 	if e.done {
 		return nil
 	}
@@ -189,14 +195,13 @@ func (e *Server) Command(arg ...string) ([]byte, error) {
 
 // Command runs an ExifTool command with the given arguments and put its stdout to channel.
 // Commands should neither read from stdin, nor write binary data to stdout.
-func (e *Server) CommandCh(chout chan<- string, arg ...string) error {
+func (e *Server) CommandCh(arg ...string) error {
 	if !e.isCustomSplit() {
 		return errors.New("err exiftool: for default splitter 'by command' better to use regular Command")
 	}
 
 	e.cmdMtx.Lock()
 	defer e.cmdMtx.Unlock()
-	defer close(chout)
 
 	e.stdin.print(arg...)
 	err := e.stdin.print("-execute" + boundary)
@@ -206,11 +211,11 @@ func (e *Server) CommandCh(chout chan<- string, arg ...string) error {
 	}
 
 	for e.stdout.Scan() {
-		chout <- e.stdout.Text()
+		e.chout <- e.stdout.Text()
 	}
 
 	if err := e.stdout.Err(); err != nil {
-		chout <- "err exiftool stdout: " + err.Error()
+		e.chout <- "err exiftool stdout: " + err.Error()
 		e.restart()
 		return err
 	}
@@ -221,12 +226,12 @@ func (e *Server) CommandCh(chout chan<- string, arg ...string) error {
 			break
 		}
 		if msg != "" {
-			chout <- "err exiftool stderr: " + msg
+			e.chout <- "err exiftool stderr: " + msg
 		}
 	}
 
 	if err := e.stderr.Err(); err != nil {
-		chout <- "err exiftool stderr: " + err.Error()
+		e.chout <- "err exiftool stderr: " + err.Error()
 		e.restart()
 		return err
 	}
