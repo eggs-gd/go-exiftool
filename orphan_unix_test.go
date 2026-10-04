@@ -69,3 +69,14 @@ func TestCloseEndsWatchdog(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// A missing ExifTool fails NewServer at once, though the watchdog shell would start
+func TestMissingExecutable(t *testing.T) {
+	saved := Exec
+	defer func() { Exec = saved }()
+	Exec = t.TempDir() + "/no-exiftool"
+	if e, err := NewServer(); err == nil {
+		e.Close()
+		t.Fatal("NewServer started a missing exiftool")
+	}
+}

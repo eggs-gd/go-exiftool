@@ -78,6 +78,11 @@ func NewServerCh(chout chan<- string, splitFunc bufio.SplitFunc, commonArg ...st
 }
 
 func (e *Server) start() error {
+	// ExifTool may start under a watchdog shell, which starts even when ExifTool
+	// cannot: a missing executable is found here
+	if _, err := exec.LookPath(e.exec); err != nil {
+		return err
+	}
 	cmd := command(e.exec, e.args...)
 
 	stdin, err := cmd.StdinPipe()
