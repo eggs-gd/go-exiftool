@@ -28,6 +28,8 @@ type Server struct {
 	cmdMtx    sync.Mutex
 	done      bool
 	cmd       *exec.Cmd
+	exited    chan struct{} // closed once ExifTool is reaped (exitErr is then set)
+	exitErr   error
 	stdin     printer
 	stdout    *bufio.Scanner
 	stderr    *bufio.Scanner
@@ -112,7 +114,17 @@ func (e *Server) start() error {
 		return err
 	}
 
-	e.cmd = cmd
+	// One goroutine reaps ExifTool, however it ends (killed, shut down, crashed),
+	// and stops its watchdog at once: the watchdog never outlives it
+	unwatch := watch(cmd.Process)
+	exited := make(chan struct{})
+	go func() {
+		err := cmd.Wait()
+		unwatch()
+		e.exitErr = err
+		close(exited)
+	}()
+	e.cmd, e.exited = cmd, exited
 	return nil
 }
 
@@ -137,10 +149,11 @@ func (e *Server) restart() error {
 	return e.start()
 }
 
-// kill stops the process and reaps it, so no zombie process is left behind.
+// kill stops the process and waits until it is reaped, so no zombie process is
+// left behind.
 func (e *Server) kill() error {
 	err := e.cmd.Process.Kill()
-	_ = e.cmd.Wait() // "signal: killed" is expected here
+	<-e.exited // "signal: killed" is expected there
 	return err
 }
 
@@ -164,11 +177,16 @@ func (e *Server) Shutdown() error {
 	e.cmdMtx.Lock()
 	defer e.cmdMtx.Unlock()
 
+	select {
+	case <-e.exited:
+		return errors.New("exiftool: already exited")
+	default:
+	}
 	e.stdin.print("-stay_open", "false")
 	e.stdin.close()
 
-	err := e.cmd.Wait()
-	return err
+	<-e.exited
+	return e.exitErr
 }
 
 // Command runs an ExifTool command with the given arguments and returns its stdout.
