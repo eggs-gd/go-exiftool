@@ -9,8 +9,11 @@ Fork of [ncruces/go-exiftool](https://github.com/ncruces/go-exiftool) adding cha
 - killed processes are reaped (no zombies);
 - **no orphans** (Unix): ExifTool never exits on its own at the end of its argfile — it polls for
   more, 100 times a second, forever — so a program that dies without `Close` (SIGKILL, a crash)
-  would leave it running. ExifTool starts under `sh` with a watchdog that kills it once its parent
-  is gone (within a second); the watchdog ends with ExifTool. Not on Windows.
+  would leave it running. Every ExifTool gets a watchdog: a shell blocked on a pipe whose only
+  writer is the Go process; when the process dies the pipe closes and the watchdog kills ExifTool at
+  once. Both are the Go process's children and reaped by it (no zombies, also as PID 1); the
+  watchdog is stopped as soon as ExifTool is reaped, so it never signals a reused pid. Not on
+  Windows.
 
 This uses the excellent ExifTool by Phil Harvey:
 - https://exiftool.org/ 
