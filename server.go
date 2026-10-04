@@ -78,7 +78,7 @@ func NewServerCh(chout chan<- string, splitFunc bufio.SplitFunc, commonArg ...st
 }
 
 func (e *Server) start() error {
-	cmd := exec.Command(e.exec, e.args...)
+	cmd := command(e.exec, e.args...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
